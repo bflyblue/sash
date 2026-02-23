@@ -63,6 +63,10 @@ static void ringbuf_push(RingBuf *rb, const char *line, size_t len)
         free(rb->lines[slot]);
     }
     rb->lines[slot]   = strndup(line, len);
+    if (!rb->lines[slot]) {
+        rb->lengths[slot] = 0;
+        return;
+    }
     rb->lengths[slot]  = len;
 }
 
