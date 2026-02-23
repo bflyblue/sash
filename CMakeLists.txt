@@ -31,3 +31,10 @@ add_executable(sash sash.c)
 
 # Install
 install(TARGETS sash DESTINATION bin)
+
+enable_testing()
+add_test(NAME integration_tests
+         COMMAND bash ${CMAKE_SOURCE_DIR}/tests/run_tests.sh)
+set_tests_properties(integration_tests PROPERTIES
+    ENVIRONMENT "SASH_BIN=${CMAKE_BINARY_DIR}/sash"
+)
