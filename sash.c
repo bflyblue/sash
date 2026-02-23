@@ -1,6 +1,9 @@
 /*
  * sash - tee with a live tail window
  *
+ * Copyright (c) 2026, Shaun Sharples
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
  * Pipes stdin to output files (like tee) while showing only the last N lines
  * in a fixed terminal region that redraws in place.
  */
@@ -259,7 +262,10 @@ static void build_redraw(void)
 
     /* draw each row */
     char *san = malloc((size_t)content_cols + 1);
-    if (!san) return;
+    if (!san) {
+        perror("sash: malloc");
+        exit(1);
+    }
 
     /* compute base line number for visible rows */
     size_t visible = g_ring.count < (size_t)height
@@ -452,11 +458,14 @@ static char *join_args(char **argv)
         perror("sash: malloc");
         exit(1);
     }
-    buf[0] = '\0';
+    char *p = buf;
     for (int i = 0; argv[i]; i++) {
-        if (i > 0) strcat(buf, " ");
-        strcat(buf, argv[i]);
+        if (i > 0) *p++ = ' ';
+        size_t n = strlen(argv[i]);
+        memcpy(p, argv[i], n);
+        p += n;
     }
+    *p = '\0';
     return buf;
 }
 

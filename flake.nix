@@ -21,6 +21,13 @@
               in !(baseName == "build" || baseName == "result" || baseName == ".direnv");
           };
           nativeBuildInputs = [ pkgs.cmake ];
+          meta = with pkgs.lib; {
+            description = "tee with a live tail window";
+            homepage = "https://github.com/bflyblue/sash";
+            license = licenses.bsd2;
+            platforms = platforms.unix;
+            mainProgram = "sash";
+          };
         };
 
         devShells.default = pkgs.mkShell {
