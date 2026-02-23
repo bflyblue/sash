@@ -101,17 +101,35 @@ static size_t   g_total_lines  = 0;
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
+static void add_file(const char *path, const char *mode)
+{
+    g_files = realloc(g_files, (size_t)(g_nfiles + 1) * sizeof(FILE *));
+    if (!g_files) {
+        perror("sash: realloc");
+        exit(1);
+    }
+    g_files[g_nfiles] = fopen(path, mode);
+    if (!g_files[g_nfiles]) {
+        fprintf(stderr, "sash: cannot open '%s': %s\n",
+                path, strerror(errno));
+        /* non-fatal: store NULL, skip during writes */
+    }
+    g_nfiles++;
+}
+
 static void usage(void)
 {
     fprintf(stderr,
-        "Usage: sash [-n lines] [-f] [-h] [file ...] [-- command [args...]]\n"
+        "Usage: sash [-n lines] [-f] [-w file] [-a file] [-h] [command [args...]]\n"
         "\n"
         "  -n N    Window height (default: 10)\n"
         "  -f      Flush output files after each line\n"
+        "  -w FILE Write output to FILE (truncate)\n"
+        "  -a FILE Append output to FILE\n"
         "  -h      Show this help\n"
         "\n"
-        "Pipe mode:    command | sash [file ...]\n"
-        "Command mode: sash [file ...] -- command [args...]\n");
+        "Pipe mode:    command | sash [-w file ...]\n"
+        "Command mode: sash [-w file ...] command [args...]\n");
 }
 
 static void get_terminal_size(void)
@@ -470,19 +488,8 @@ static void cleanup(void)
 
 int main(int argc, char *argv[])
 {
-    /* scan for "--" before getopt */
-    int cmd_start = 0;
-    int orig_argc = argc;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--") == 0) {
-            cmd_start = i + 1;
-            argc = i;  /* hide command from getopt */
-            break;
-        }
-    }
-
     int opt;
-    while ((opt = getopt(argc, argv, "n:fh")) != -1) {
+    while ((opt = getopt(argc, argv, "n:fw:a:h")) != -1) {
         switch (opt) {
         case 'n':
             g_win_height = atoi(optarg);
@@ -494,31 +501,18 @@ int main(int argc, char *argv[])
         case 'f':
             g_flush = true;
             break;
+        case 'w':
+            add_file(optarg, "w");
+            break;
+        case 'a':
+            add_file(optarg, "a");
+            break;
         case 'h':
             usage();
             return 0;
         default:
             usage();
             return 1;
-        }
-    }
-
-    /* remaining args are output files */
-    int nfiles = argc - optind;
-    if (nfiles > 0) {
-        g_files  = calloc((size_t)nfiles, sizeof(FILE *));
-        g_nfiles = nfiles;
-        if (!g_files) {
-            perror("sash: calloc");
-            return 1;
-        }
-        for (int i = 0; i < nfiles; i++) {
-            g_files[i] = fopen(argv[optind + i], "w");
-            if (!g_files[i]) {
-                fprintf(stderr, "sash: cannot open '%s': %s\n",
-                        argv[optind + i], strerror(errno));
-                /* non-fatal: continue with other files */
-            }
         }
     }
 
@@ -529,12 +523,12 @@ int main(int argc, char *argv[])
         g_is_tty = true;
     }
 
-    /* set up input source */
+    /* set up input source — positional args are the command */
     FILE *input = stdin;
 
-    if (cmd_start > 0 && cmd_start < orig_argc) {
+    if (optind < argc) {
         int pipe_fd;
-        g_child_pid = spawn_command(&argv[cmd_start], &pipe_fd);
+        g_child_pid = spawn_command(&argv[optind], &pipe_fd);
         input = fdopen(pipe_fd, "r");
         if (!input) {
             perror("sash: fdopen");
