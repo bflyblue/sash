@@ -21,6 +21,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 /* ── Ring buffer ─────────────────────────────────────────────────── */
@@ -103,6 +104,7 @@ static int      g_win_height   = 10;
 static int      g_term_cols    = 80;
 static int      g_term_rows    = 24;
 static int      g_scroll_bottom = 0;  /* last row of scroll region (0 = none) */
+static int      g_win_top       = 0;  /* first row of the tail window */
 static bool     g_started      = false;
 static size_t   g_total_lines  = 0;
 
@@ -252,7 +254,7 @@ static void build_redraw(void)
         height = g_term_rows - 1;
     if (height < 1) height = 1;
 
-    int win_top = g_term_rows - height + 1;
+    int win_top = g_win_top;
     int margin = g_line_numbers ? 6 : 0;
     int content_cols = g_term_cols - margin;
     if (content_cols < 1) content_cols = 1;
@@ -329,6 +331,48 @@ static void redraw_window(void)
     dbuf_flush();
 }
 
+/*
+ * Query the cursor's current row via DSR (Device Status Report).
+ * Returns the 1-based row number, or 0 on failure.
+ */
+static int get_cursor_row(void)
+{
+    if (g_tty_fd < 0) return 0;
+
+    struct termios orig, raw;
+    if (tcgetattr(g_tty_fd, &orig) == -1) return 0;
+
+    raw = orig;
+    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
+    raw.c_cc[VMIN]  = 0;
+    raw.c_cc[VTIME] = 1;  /* 100 ms timeout */
+    if (tcsetattr(g_tty_fd, TCSANOW, &raw) == -1) return 0;
+
+    /* send DSR */
+    (void)!write(g_tty_fd, "\033[6n", 4);
+
+    /* read response: \033[row;colR */
+    char resp[32];
+    size_t pos = 0;
+    while (pos < sizeof(resp) - 1) {
+        ssize_t n = read(g_tty_fd, &resp[pos], 1);
+        if (n <= 0) break;
+        if (resp[pos] == 'R') { pos++; break; }
+        pos++;
+    }
+    resp[pos] = '\0';
+
+    tcsetattr(g_tty_fd, TCSANOW, &orig);
+
+    /* parse \033[row;colR */
+    int row = 0;
+    char *p = strchr(resp, '[');
+    if (p) {
+        row = atoi(p + 1);
+    }
+    return row;
+}
+
 static void setup_window(void)
 {
     if (!g_is_tty) return;
@@ -340,16 +384,25 @@ static void setup_window(void)
         height = g_term_rows - 1;
     if (height < 1) height = 1;
 
-    g_scroll_bottom = g_term_rows - height;
+    /* Decide where to place the window: just below the cursor if it fits,
+       otherwise scroll to make room at the bottom. */
+    int newlines;
+    int cursor_row = get_cursor_row();
+    if (cursor_row > 0 && cursor_row + height - 1 <= g_term_rows) {
+        g_win_top = cursor_row;
+        newlines = 0;
+    } else {
+        g_win_top = g_term_rows - height + 1;
+        newlines = height - 1;
+    }
+    g_scroll_bottom = g_win_top - 1;
 
     /* Everything below is assembled into one buffer and emitted as a single
        atomic write() to avoid other TTY writers slipping in between. */
     dbuf_reset();
 
-    /* Reserve space: push existing content (prompt, etc.) above the window.
-       Use height-1 because the shell already printed a newline after the
-       command line before exec'ing us. */
-    for (int i = 0; i < height - 1; i++)
+    /* Reserve space: push existing content (prompt, etc.) above the window. */
+    for (int i = 0; i < newlines; i++)
         dbuf_append("\n", 1);
 
     /* Hide cursor — stays hidden for the lifetime of the tool */
@@ -431,7 +484,8 @@ static void handle_resize(void)
         height = g_term_rows - 1;
     if (height < 1) height = 1;
 
-    g_scroll_bottom = g_term_rows - height;
+    g_win_top = g_term_rows - height + 1;
+    g_scroll_bottom = g_win_top - 1;
 
     if (g_started) {
         dbuf_reset();
@@ -520,8 +574,13 @@ static void cleanup(void)
     /* reset scroll region, move cursor below the window, show it */
     if (g_is_tty && g_started && g_tty_fd >= 0) {
         char buf[64];
+        int height = g_win_height;
+        if (height > g_term_rows - 1) height = g_term_rows - 1;
+        if (height < 1) height = 1;
+        int after = g_win_top + height;
+        if (after > g_term_rows) after = g_term_rows;
         int n = snprintf(buf, sizeof(buf),
-                         "\033[r\033[%d;1H\n\033[?25h", g_term_rows);
+                         "\033[r\033[%d;1H\n\033[?25h", after);
         if (n > 0)
             tty_write(buf, (size_t)n);
     }
@@ -593,7 +652,7 @@ int main(int argc, char *argv[])
     }
 
     /* detect controlling terminal */
-    g_tty = fopen("/dev/tty", "w");
+    g_tty = fopen("/dev/tty", "r+");
     if (g_tty) {
         g_tty_fd = fileno(g_tty);
         g_is_tty = true;
