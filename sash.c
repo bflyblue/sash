@@ -8,7 +8,11 @@
  * in a fixed terminal region that redraws in place.
  */
 
-#define _POSIX_C_SOURCE 200809L
+#ifdef __APPLE__
+#define _DARWIN_C_SOURCE
+#else
+#define _GNU_SOURCE
+#endif
 
 #include <ctype.h>
 #include <errno.h>
