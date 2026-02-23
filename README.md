@@ -6,7 +6,7 @@ Pipes stdin to output files (like `tee`) while showing only the last N lines
 in a fixed terminal region that redraws in place. Your scrollback stays clean;
 you always see the tail of the stream.
 
-<!-- TODO: add demo GIF -->
+![demo](demo.gif)
 
 ## Installation
 
