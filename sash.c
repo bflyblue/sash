@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 /* ── Ring buffer ─────────────────────────────────────────────────── */
@@ -82,31 +83,35 @@ static volatile sig_atomic_t g_resize  = 0;
 static volatile sig_atomic_t g_sigint  = 0;
 static volatile sig_atomic_t g_sigpipe = 0;
 
+static pid_t g_child_pid = 0;
+
 static RingBuf  g_ring;
-static FILE   **g_files      = NULL;
-static int      g_nfiles     = 0;
-static FILE    *g_tty        = NULL;
-static int      g_tty_fd     = -1;
-static bool     g_is_tty     = false;
-static bool     g_flush      = false;
-static int      g_win_height = 10;
-static int      g_term_cols  = 80;
-static int      g_term_rows  = 24;
-static bool     g_started    = false;  /* has the window been drawn at least once? */
-static size_t   g_total_lines = 0;
+static FILE   **g_files        = NULL;
+static int      g_nfiles       = 0;
+static FILE    *g_tty          = NULL;
+static int      g_tty_fd       = -1;
+static bool     g_is_tty       = false;
+static bool     g_flush        = false;
+static int      g_win_height   = 10;
+static int      g_term_cols    = 80;
+static int      g_term_rows    = 24;
+static int      g_scroll_bottom = 0;  /* last row of scroll region (0 = none) */
+static bool     g_started      = false;
+static size_t   g_total_lines  = 0;
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
 static void usage(void)
 {
     fprintf(stderr,
-        "Usage: command | sash [-n lines] [-f] [-h] [file ...]\n"
+        "Usage: sash [-n lines] [-f] [-h] [file ...] [-- command [args...]]\n"
         "\n"
         "  -n N    Window height (default: 10)\n"
         "  -f      Flush output files after each line\n"
         "  -h      Show this help\n"
         "\n"
-        "Pipes stdin to files while showing a live tail of the last N lines.\n");
+        "Pipe mode:    command | sash [file ...]\n"
+        "Command mode: sash [file ...] -- command [args...]\n");
 }
 
 static void get_terminal_size(void)
@@ -162,20 +167,18 @@ static void dbuf_printf(const char *fmt, ...)
         dbuf_append(tmp, (size_t)n);
 }
 
+/* Single write() call — the kernel's tty atomic_write_lock ensures this
+   won't interleave with other writers.  We intentionally don't retry short
+   writes: a torn frame is better than two syscalls with a gap between them. */
 static void tty_write(const char *buf, size_t len)
 {
-    while (len > 0) {
-        ssize_t n = write(g_tty_fd, buf, len);
-        if (n <= 0) break;
-        buf += n;
-        len -= (size_t)n;
-    }
+    if (g_tty_fd >= 0 && len > 0)
+        (void)!write(g_tty_fd, buf, len);
 }
 
 static void dbuf_flush(void)
 {
-    if (g_tty_fd >= 0 && g_draw_len > 0)
-        tty_write(g_draw_buf, g_draw_len);
+    tty_write(g_draw_buf, g_draw_len);
 }
 
 /*
@@ -205,23 +208,25 @@ static size_t sanitize_line(char *dst, size_t dst_cap,
     return col;
 }
 
-static void redraw_window(void)
+/*
+ * Append the window content to dbuf.  Does not reset or flush — the caller
+ * can prepend setup sequences and still emit everything in one write().
+ *
+ * Uses absolute cursor positioning to the fixed window area at the bottom
+ * of the screen (below the scroll region).  The scroll region isolates
+ * the window from scrolling caused by other processes writing to the TTY.
+ */
+static void build_redraw(void)
 {
-    if (!g_is_tty) return;
-
     int height = g_win_height;
     if (height > g_term_rows - 1)
         height = g_term_rows - 1;
     if (height < 1) height = 1;
 
-    dbuf_reset();
+    int win_top = g_term_rows - height + 1;
 
-    /* hide cursor */
-    dbuf_append("\033[?25l", 6);
-
-    /* move cursor up to the top of our window */
-    if (height - 1 > 0)
-        dbuf_printf("\033[%dA", height - 1);
+    /* move to the first row of the window */
+    dbuf_printf("\033[%d;1H", win_top);
 
     /* draw each row */
     char *san = malloc((size_t)g_term_cols + 1);
@@ -258,9 +263,17 @@ static void redraw_window(void)
 
     free(san);
 
-    /* show cursor */
-    dbuf_append("\033[?25h", 6);
+    /* park cursor at the bottom of the scroll region so any concurrent
+       output (e.g. stderr from the piped command) appears above the window */
+    if (g_scroll_bottom > 0)
+        dbuf_printf("\033[%d;1H", g_scroll_bottom);
+}
 
+static void redraw_window(void)
+{
+    if (!g_is_tty) return;
+    dbuf_reset();
+    build_redraw();
     dbuf_flush();
 }
 
@@ -275,13 +288,31 @@ static void setup_window(void)
         height = g_term_rows - 1;
     if (height < 1) height = 1;
 
-    /* reserve space: print (height-1) newlines so the cursor sits at the
-       bottom of our future window */
-    for (int i = 0; i < height - 1; i++)
-        tty_write("\n", 1);
+    g_scroll_bottom = g_term_rows - height;
 
+    /* Everything below is assembled into one buffer and emitted as a single
+       atomic write() to avoid other TTY writers slipping in between. */
+    dbuf_reset();
+
+    /* Reserve space: push existing content (prompt, etc.) above the window */
+    for (int i = 0; i < height; i++)
+        dbuf_append("\n", 1);
+
+    /* Hide cursor — stays hidden for the lifetime of the tool */
+    dbuf_append("\033[?25l", 6);
+
+    /* Set scroll region to the rows above the window.  Anything writing to
+       the TTY while the cursor is in this region (e.g. stderr from a piped
+       command) will scroll within it, leaving the window untouched.
+       DECSTBM requires top < bottom, so we need at least 2 rows. */
+    if (g_scroll_bottom >= 2)
+        dbuf_printf("\033[1;%dr", g_scroll_bottom);
+
+    /* Draw the initial (empty) window and park cursor in the scroll region */
+    build_redraw();
+
+    dbuf_flush();
     g_started = true;
-    redraw_window();
 }
 
 /* ── File I/O ────────────────────────────────────────────────────── */
@@ -340,17 +371,77 @@ static void handle_resize(void)
 {
     g_resize = 0;
     get_terminal_size();
-    if (g_started)
-        redraw_window();
+
+    int height = g_win_height;
+    if (height > g_term_rows - 1)
+        height = g_term_rows - 1;
+    if (height < 1) height = 1;
+
+    g_scroll_bottom = g_term_rows - height;
+
+    if (g_started) {
+        dbuf_reset();
+        /* update scroll region for new terminal size */
+        if (g_scroll_bottom >= 2)
+            dbuf_printf("\033[1;%dr", g_scroll_bottom);
+        else
+            dbuf_append("\033[r", 3);  /* reset to full screen */
+        build_redraw();
+        dbuf_flush();
+    }
+}
+
+/* ── Command spawning ────────────────────────────────────────────── */
+
+static pid_t spawn_command(char **cmd_argv, int *read_fd)
+{
+    int pipefd[2];
+    if (pipe(pipefd) == -1) {
+        perror("sash: pipe");
+        exit(1);
+    }
+
+    pid_t pid = fork();
+    if (pid == -1) {
+        perror("sash: fork");
+        exit(1);
+    }
+
+    if (pid == 0) {
+        /* child */
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        dup2(pipefd[1], STDERR_FILENO);
+        close(pipefd[1]);
+        execvp(cmd_argv[0], cmd_argv);
+        perror("sash: exec");
+        _exit(127);
+    }
+
+    /* parent */
+    close(pipefd[1]);
+    *read_fd = pipefd[0];
+    return pid;
 }
 
 /* ── Cleanup ─────────────────────────────────────────────────────── */
 
 static void cleanup(void)
 {
-    /* move cursor below the window and show it */
+    /* kill child if still running */
+    if (g_child_pid > 0) {
+        kill(g_child_pid, SIGTERM);
+        waitpid(g_child_pid, NULL, 0);
+        g_child_pid = 0;
+    }
+
+    /* reset scroll region, move cursor below the window, show it */
     if (g_is_tty && g_started && g_tty_fd >= 0) {
-        tty_write("\n\033[?25h", 7);
+        char buf[64];
+        int n = snprintf(buf, sizeof(buf),
+                         "\033[r\033[%d;1H\n\033[?25h", g_term_rows);
+        if (n > 0)
+            tty_write(buf, (size_t)n);
     }
 
     /* close output files */
@@ -379,6 +470,17 @@ static void cleanup(void)
 
 int main(int argc, char *argv[])
 {
+    /* scan for "--" before getopt */
+    int cmd_start = 0;
+    int orig_argc = argc;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--") == 0) {
+            cmd_start = i + 1;
+            argc = i;  /* hide command from getopt */
+            break;
+        }
+    }
+
     int opt;
     while ((opt = getopt(argc, argv, "n:fh")) != -1) {
         switch (opt) {
@@ -427,8 +529,18 @@ int main(int argc, char *argv[])
         g_is_tty = true;
     }
 
-    /* warn if stdin is a terminal (user probably forgot to pipe) */
-    if (isatty(STDIN_FILENO)) {
+    /* set up input source */
+    FILE *input = stdin;
+
+    if (cmd_start > 0 && cmd_start < orig_argc) {
+        int pipe_fd;
+        g_child_pid = spawn_command(&argv[cmd_start], &pipe_fd);
+        input = fdopen(pipe_fd, "r");
+        if (!input) {
+            perror("sash: fdopen");
+            return 1;
+        }
+    } else if (isatty(STDIN_FILENO)) {
         fprintf(stderr, "sash: warning: reading from terminal "
                         "(did you forget to pipe input?)\n");
     }
@@ -447,7 +559,7 @@ int main(int argc, char *argv[])
     ssize_t nread;
     int     exit_code = 0;
 
-    while ((nread = getline(&line, &line_cap, stdin)) > 0) {
+    while ((nread = getline(&line, &line_cap, input)) > 0) {
         /* check for resize before processing */
         if (g_resize)
             handle_resize();
@@ -468,6 +580,20 @@ int main(int argc, char *argv[])
     }
 
     free(line);
+
+    /* reap child and propagate exit code */
+    if (g_child_pid > 0) {
+        int status;
+        waitpid(g_child_pid, &status, 0);
+        g_child_pid = 0;
+        if (WIFEXITED(status))
+            exit_code = WEXITSTATUS(status);
+        else if (WIFSIGNALED(status))
+            exit_code = 128 + WTERMSIG(status);
+    }
+
+    if (input != stdin)
+        fclose(input);
 
     if (g_sigint) {
         exit_code = 130;
