@@ -203,7 +203,7 @@ static void dbuf_printf(const char *fmt, ...)
     int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
     va_end(ap);
     if (n > 0)
-        dbuf_append(tmp, (size_t)n);
+        dbuf_append(tmp, n < (int)sizeof(tmp) ? (size_t)n : sizeof(tmp) - 1);
 }
 
 /* Single write() call — the kernel's tty atomic_write_lock ensures this
