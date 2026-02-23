@@ -678,6 +678,10 @@ int main(int argc, char *argv[])
         input = fdopen(pipe_fd, "r");
         if (!input) {
             perror("sash: fdopen");
+            close(pipe_fd);
+            kill(g_child_pid, SIGTERM);
+            waitpid(g_child_pid, NULL, 0);
+            g_child_pid = 0;
             return 1;
         }
     } else if (isatty(STDIN_FILENO)) {
