@@ -93,6 +93,9 @@ static int      g_tty_fd       = -1;
 static bool     g_is_tty       = false;
 static bool     g_flush        = false;
 static bool     g_exec         = false;
+static bool     g_line_numbers = false;
+static bool     g_color        = false;
+static int      g_color_mode   = 0;  /* 0=auto, 1=force on, -1=force off */
 static int      g_win_height   = 10;
 static int      g_term_cols    = 80;
 static int      g_term_rows    = 24;
@@ -121,11 +124,14 @@ static void add_file(const char *path, const char *mode)
 static void usage(void)
 {
     fprintf(stderr,
-        "Usage: sash [-n lines] [-f] [-x] [-w file] [-a file] [-h] [command [args...]]\n"
+        "Usage: sash [-n lines] [-f] [-x] [-l] [-c|-C] [-w file] [-a file] [-h] [command [args...]]\n"
         "\n"
         "  -n N    Window height (default: 10)\n"
         "  -f      Flush output files after each line\n"
         "  -x      Use exec instead of shell (no pipes, &&, etc.)\n"
+        "  -l      Show line numbers\n"
+        "  -c      Force color on\n"
+        "  -C      Force color off\n"
         "  -w FILE Write output to FILE (truncate)\n"
         "  -a FILE Append output to FILE\n"
         "  -h      Show this help\n"
@@ -244,13 +250,21 @@ static void build_redraw(void)
     if (height < 1) height = 1;
 
     int win_top = g_term_rows - height + 1;
+    int margin = g_line_numbers ? 6 : 0;
+    int content_cols = g_term_cols - margin;
+    if (content_cols < 1) content_cols = 1;
 
     /* move to the first row of the window */
     dbuf_printf("\033[%d;1H", win_top);
 
     /* draw each row */
-    char *san = malloc((size_t)g_term_cols + 1);
+    char *san = malloc((size_t)content_cols + 1);
     if (!san) return;
+
+    /* compute base line number for visible rows */
+    size_t visible = g_ring.count < (size_t)height
+                   ? g_ring.count : (size_t)height;
+    size_t base = g_total_lines - visible + 1;
 
     for (int row = 0; row < height; row++) {
         /* carriage return + clear line */
@@ -267,12 +281,24 @@ static void build_redraw(void)
             else
                 idx = g_ring.count - (size_t)height + (size_t)row;
             line = ringbuf_get(&g_ring, idx, &len);
+
+            if (g_line_numbers) {
+                if (g_color) dbuf_append("\033[90m", 5);
+                dbuf_printf("%5zu\xe2\x94\x82", base + (size_t)row);
+                if (g_color) dbuf_append("\033[0m", 4);
+            }
         } else {
             line = "";
             len  = 0;
+
+            if (g_line_numbers) {
+                if (g_color) dbuf_append("\033[90m", 5);
+                dbuf_append("     \xe2\x94\x82", 8);
+                if (g_color) dbuf_append("\033[0m", 4);
+            }
         }
 
-        size_t slen = sanitize_line(san, (size_t)g_term_cols, line, len);
+        size_t slen = sanitize_line(san, (size_t)content_cols, line, len);
         if (slen > 0)
             dbuf_append(san, slen);
 
@@ -518,7 +544,7 @@ static void cleanup(void)
 int main(int argc, char *argv[])
 {
     int opt;
-    while ((opt = getopt(argc, argv, "n:fxw:a:h")) != -1) {
+    while ((opt = getopt(argc, argv, "n:fxlcCw:a:h")) != -1) {
         switch (opt) {
         case 'n':
             g_win_height = atoi(optarg);
@@ -532,6 +558,15 @@ int main(int argc, char *argv[])
             break;
         case 'x':
             g_exec = true;
+            break;
+        case 'l':
+            g_line_numbers = true;
+            break;
+        case 'c':
+            g_color_mode = 1;
+            break;
+        case 'C':
+            g_color_mode = -1;
             break;
         case 'w':
             add_file(optarg, "w");
@@ -553,6 +588,17 @@ int main(int argc, char *argv[])
     if (g_tty) {
         g_tty_fd = fileno(g_tty);
         g_is_tty = true;
+    }
+
+    /* detect color support */
+    if (g_color_mode == 1) {
+        g_color = true;
+    } else if (g_color_mode == -1) {
+        g_color = false;
+    } else if (g_is_tty && !getenv("NO_COLOR")) {
+        const char *term = getenv("TERM");
+        if (term && strcmp(term, "dumb") != 0)
+            g_color = true;
     }
 
     /* set up input source — positional args are the command */
