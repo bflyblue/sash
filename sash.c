@@ -92,6 +92,7 @@ static FILE    *g_tty          = NULL;
 static int      g_tty_fd       = -1;
 static bool     g_is_tty       = false;
 static bool     g_flush        = false;
+static bool     g_exec         = false;
 static int      g_win_height   = 10;
 static int      g_term_cols    = 80;
 static int      g_term_rows    = 24;
@@ -120,10 +121,11 @@ static void add_file(const char *path, const char *mode)
 static void usage(void)
 {
     fprintf(stderr,
-        "Usage: sash [-n lines] [-f] [-w file] [-a file] [-h] [command [args...]]\n"
+        "Usage: sash [-n lines] [-f] [-x] [-w file] [-a file] [-h] [command [args...]]\n"
         "\n"
         "  -n N    Window height (default: 10)\n"
         "  -f      Flush output files after each line\n"
+        "  -x      Use exec instead of shell (no pipes, &&, etc.)\n"
         "  -w FILE Write output to FILE (truncate)\n"
         "  -a FILE Append output to FILE\n"
         "  -h      Show this help\n"
@@ -411,7 +413,26 @@ static void handle_resize(void)
 
 /* ── Command spawning ────────────────────────────────────────────── */
 
-static pid_t spawn_command(char **cmd_argv, int *read_fd)
+/* Join argv into a single space-separated string for sh -c */
+static char *join_args(char **argv)
+{
+    size_t len = 0;
+    for (int i = 0; argv[i]; i++)
+        len += strlen(argv[i]) + 1;
+    char *buf = malloc(len);
+    if (!buf) {
+        perror("sash: malloc");
+        exit(1);
+    }
+    buf[0] = '\0';
+    for (int i = 0; argv[i]; i++) {
+        if (i > 0) strcat(buf, " ");
+        strcat(buf, argv[i]);
+    }
+    return buf;
+}
+
+static pid_t spawn_command(char **cmd_argv, bool use_exec, int *read_fd)
 {
     int pipefd[2];
     if (pipe(pipefd) == -1) {
@@ -431,7 +452,13 @@ static pid_t spawn_command(char **cmd_argv, int *read_fd)
         dup2(pipefd[1], STDOUT_FILENO);
         dup2(pipefd[1], STDERR_FILENO);
         close(pipefd[1]);
-        execvp(cmd_argv[0], cmd_argv);
+        if (use_exec) {
+            execvp(cmd_argv[0], cmd_argv);
+        } else {
+            char *cmd = join_args(cmd_argv);
+            execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+            free(cmd);
+        }
         perror("sash: exec");
         _exit(127);
     }
@@ -489,7 +516,7 @@ static void cleanup(void)
 int main(int argc, char *argv[])
 {
     int opt;
-    while ((opt = getopt(argc, argv, "n:fw:a:h")) != -1) {
+    while ((opt = getopt(argc, argv, "n:fxw:a:h")) != -1) {
         switch (opt) {
         case 'n':
             g_win_height = atoi(optarg);
@@ -500,6 +527,9 @@ int main(int argc, char *argv[])
             break;
         case 'f':
             g_flush = true;
+            break;
+        case 'x':
+            g_exec = true;
             break;
         case 'w':
             add_file(optarg, "w");
@@ -528,7 +558,7 @@ int main(int argc, char *argv[])
 
     if (optind < argc) {
         int pipe_fd;
-        g_child_pid = spawn_command(&argv[optind], &pipe_fd);
+        g_child_pid = spawn_command(&argv[optind], g_exec, &pipe_fd);
         input = fdopen(pipe_fd, "r");
         if (!input) {
             perror("sash: fdopen");
