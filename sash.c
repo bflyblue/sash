@@ -314,8 +314,10 @@ static void setup_window(void)
        atomic write() to avoid other TTY writers slipping in between. */
     dbuf_reset();
 
-    /* Reserve space: push existing content (prompt, etc.) above the window */
-    for (int i = 0; i < height; i++)
+    /* Reserve space: push existing content (prompt, etc.) above the window.
+       Use height-1 because the shell already printed a newline after the
+       command line before exec'ing us. */
+    for (int i = 0; i < height - 1; i++)
         dbuf_append("\n", 1);
 
     /* Hide cursor — stays hidden for the lifetime of the tool */
