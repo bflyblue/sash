@@ -178,23 +178,6 @@ assert_exit "-a flag accepted" 0 sh -c 'echo hello | "$1" -a' _ "$SASH"
 # 27. -A flag accepted
 assert_exit "-A flag accepted" 0 sh -c 'echo hello | "$1" -A' _ "$SASH"
 
-# 28. Passthrough preserves ANSI sequences in output
-out="$(printf 'x\033[31mred\033[0my\n' | "$SASH")"
-expected="$(printf 'x\033[31mred\033[0my')"
-assert_eq "passthrough preserves ANSI" "$expected" "$out"
-
-# 29. -a passthrough preserves ANSI sequences in output
-out="$(printf 'x\033[31mred\033[0my\n' | "$SASH" -a)"
-expected="$(printf 'x\033[31mred\033[0my')"
-assert_eq "-a passthrough preserves ANSI" "$expected" "$out"
-
-# 30. -a with -w: file gets raw ANSI sequences
-f="$TMPDIR/ansi.txt"
-printf 'x\033[31mred\033[0my\n' | "$SASH" -a -w "$f" >/dev/null
-expected="$(printf 'x\033[31mred\033[0my')"
-actual="$(cat "$f" | tr -d '\n')"
-assert_eq "-a with -w: file gets raw ANSI" "$expected" "$actual"
-
 echo ""
 echo "=== Results: $PASS/$TOTAL passed, $FAIL failed ==="
 

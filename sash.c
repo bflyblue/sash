@@ -55,7 +55,7 @@ int      g_scroll_bottom = 0;  /* last row of scroll region (0 = none) */
 int      g_win_top       = 0;  /* first row of the tail window */
 bool     g_started      = false;
 size_t   g_total_lines  = 0;
-bool     g_ansi         = false;
+bool     g_ansi         = true;
 static int      g_ansi_mode    = 0;  /* 0=auto, 1=force on, -1=force off */
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
