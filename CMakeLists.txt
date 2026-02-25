@@ -38,3 +38,6 @@ add_test(NAME integration_tests
 set_tests_properties(integration_tests PROPERTIES
     ENVIRONMENT "SASH_BIN=${CMAKE_BINARY_DIR}/sash"
 )
+
+add_executable(test_sanitize tests/test_sanitize.c)
+add_test(NAME test_sanitize COMMAND test_sanitize)

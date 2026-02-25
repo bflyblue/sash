@@ -96,30 +96,76 @@ void get_terminal_size(void)
 /* ── Rendering ───────────────────────────────────────────────────── */
 
 /*
- * Sanitise a line for terminal display: replace control characters (except
- * tab) with '.', strip trailing newline, and truncate to terminal width.
- * Returns number of characters written to dst.
+ * Sanitise a line for terminal display and append the result to dbuf.
+ *
+ * Appends directly to dbuf rather than writing to a fixed-size destination
+ * buffer because ANSI escape sequences add bytes without consuming visible
+ * columns — output can exceed max_cols bytes even though it fits on screen.
+ *
+ * When g_ansi is false (default): replace control characters (except tab)
+ * with '.', strip \n/\r, expand tabs, truncate to max_cols visible columns.
+ *
+ * When g_ansi is true: same, but pass through ANSI escape sequences (CSI
+ * and two-byte ESC sequences) without counting them as visible columns.
+ * Appends a SGR reset (\033[0m) to prevent color bleed between rows.
  */
-static size_t sanitize_line(char *dst, size_t dst_cap,
-                            const char *src, size_t src_len)
+static void sanitize_line(const char *src, size_t src_len, size_t max_cols)
 {
     size_t col = 0;
-    for (size_t i = 0; i < src_len && col < dst_cap; i++) {
+    for (size_t i = 0; i < src_len && col < max_cols; i++) {
         unsigned char ch = (unsigned char)src[i];
+
+        if (g_ansi && ch == '\033' && i + 1 < src_len) {
+            if (src[i + 1] == '[') {
+                /* CSI sequence: \033[ ... <final byte 0x40-0x7E> */
+                size_t start = i;
+                i += 2;  /* skip ESC [ */
+                while (i < src_len) {
+                    unsigned char c = (unsigned char)src[i];
+                    if (c >= 0x40 && c <= 0x7E) {
+                        i++;  /* include final byte */
+                        break;
+                    }
+                    i++;
+                }
+                dbuf_append(src + start, i - start);
+                i--;  /* compensate for loop increment */
+            } else {
+                /* Two-byte escape: ESC + next char */
+                dbuf_append(src + i, 2);
+                i++;  /* skip next char */
+            }
+            continue;
+        }
+
         if (ch == '\n' || ch == '\r')
             continue;
+
         if (ch == '\t') {
-            /* expand tab to spaces up to next 8-col stop */
             size_t stop = ((col / 8) + 1) * 8;
-            while (col < stop && col < dst_cap)
-                dst[col++] = ' ';
-        } else if (ch < 0x20 || ch == 0x7f) {
-            dst[col++] = '.';
-        } else {
-            dst[col++] = (char)ch;
+            if (stop > max_cols) stop = max_cols;
+            while (col < stop) {
+                dbuf_ensure(1);
+                g_draw_buf[g_draw_len++] = ' ';
+                col++;
+            }
+            continue;
         }
+
+        if (ch < 0x20 || ch == 0x7f) {
+            dbuf_ensure(1);
+            g_draw_buf[g_draw_len++] = '.';
+            col++;
+            continue;
+        }
+
+        dbuf_ensure(1);
+        g_draw_buf[g_draw_len++] = (char)ch;
+        col++;
     }
-    return col;
+
+    if (g_ansi)
+        dbuf_append("\033[0m", 4);
 }
 
 /*
@@ -144,13 +190,6 @@ static void build_redraw(void)
 
     /* move to the first row of the window */
     dbuf_printf("\033[%d;1H", win_top);
-
-    /* draw each row */
-    char *san = malloc((size_t)content_cols + 1);
-    if (!san) {
-        perror("sash: malloc");
-        exit(1);
-    }
 
     /* compute base line number for visible rows */
     size_t visible = g_ring.count < (size_t)height
@@ -189,16 +228,12 @@ static void build_redraw(void)
             }
         }
 
-        size_t slen = sanitize_line(san, (size_t)content_cols, line, len);
-        if (slen > 0)
-            dbuf_append(san, slen);
+        sanitize_line(line, len, (size_t)content_cols);
 
         /* move down (except on last row) */
         if (row < height - 1)
             dbuf_append("\n", 1);
     }
-
-    free(san);
 
     /* park cursor at the bottom of the scroll region so any concurrent
        output (e.g. stderr from the piped command) appears above the window */

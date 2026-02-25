@@ -27,5 +27,6 @@ extern int      g_scroll_bottom;
 extern int      g_win_top;
 extern bool     g_started;
 extern size_t   g_total_lines;
+extern bool     g_ansi;
 
 #endif /* SASH_H */
