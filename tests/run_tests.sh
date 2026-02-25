@@ -115,11 +115,11 @@ echo "old content" > "$f"
 printf 'new\n' | "$SASH" -w "$f" >/dev/null
 assert_file_content "-w truncates existing file" "$f" "new"
 
-# 14. -a appends
+# 14. -W appends
 f="$TMPDIR/a1.txt"
 printf 'first\n' | "$SASH" -w "$f" >/dev/null
-printf 'second\n' | "$SASH" -a "$f" >/dev/null
-assert_file_content "-a appends" "$f" "$(printf 'first\nsecond')"
+printf 'second\n' | "$SASH" -W "$f" >/dev/null
+assert_file_content "-W appends" "$f" "$(printf 'first\nsecond')"
 
 # 15. Multiple output files (-w + -w)
 f1="$TMPDIR/m1.txt"
@@ -128,11 +128,11 @@ printf 'data\n' | "$SASH" -w "$f1" -w "$f2" >/dev/null
 assert_file_content "multiple -w: file 1" "$f1" "data"
 assert_file_content "multiple -w: file 2" "$f2" "data"
 
-# 16. Mixed -w and -a
+# 16. Mixed -w and -W
 f="$TMPDIR/mix.txt"
 printf 'base\n' | "$SASH" -w "$f" >/dev/null
-printf 'added\n' | "$SASH" -a "$f" >/dev/null
-assert_file_content "mixed -w and -a" "$f" "$(printf 'base\nadded')"
+printf 'added\n' | "$SASH" -W "$f" >/dev/null
+assert_file_content "mixed -w and -W" "$f" "$(printf 'base\nadded')"
 
 # 17. stdout AND file simultaneously
 f="$TMPDIR/sim.txt"
@@ -171,6 +171,12 @@ assert_exit "exit code 1 (false)" 1 "$SASH" false
 
 # 25. Exit code propagation (42)
 assert_exit "exit code propagation (42)" 42 "$SASH" 'exit 42'
+
+# 26. -a flag accepted
+assert_exit "-a flag accepted" 0 sh -c 'echo hello | "$1" -a' _ "$SASH"
+
+# 27. -A flag accepted
+assert_exit "-A flag accepted" 0 sh -c 'echo hello | "$1" -A' _ "$SASH"
 
 echo ""
 echo "=== Results: $PASS/$TOTAL passed, $FAIL failed ==="

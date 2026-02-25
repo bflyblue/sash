@@ -55,6 +55,8 @@ int      g_scroll_bottom = 0;  /* last row of scroll region (0 = none) */
 int      g_win_top       = 0;  /* first row of the tail window */
 bool     g_started      = false;
 size_t   g_total_lines  = 0;
+bool     g_ansi         = true;
+static int      g_ansi_mode    = 0;  /* 0=auto, 1=force on, -1=force off */
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -77,7 +79,7 @@ static void add_file(const char *path, const char *mode)
 static void usage(void)
 {
     fprintf(stderr,
-        "Usage: sash [-n lines] [-f] [-x] [-l] [-c|-C] [-w file] [-a file] [-h] [command [args...]]\n"
+        "Usage: sash [-n lines] [-f] [-x] [-l] [-c|-C] [-a|-A] [-w file] [-W file] [-h] [command [args...]]\n"
         "\n"
         "  -n N    Window height (default: 10)\n"
         "  -f      Flush output files after each line\n"
@@ -85,8 +87,10 @@ static void usage(void)
         "  -l      Show line numbers\n"
         "  -c      Force color on\n"
         "  -C      Force color off\n"
+        "  -a      Allow ANSI escape sequences through\n"
+        "  -A      Force ANSI escape sequences off\n"
         "  -w FILE Write output to FILE (truncate)\n"
-        "  -a FILE Append output to FILE\n"
+        "  -W FILE Append output to FILE\n"
         "  -h      Show this help\n"
         "\n"
         "Pipe mode:    command | sash [-w file ...]\n"
@@ -196,7 +200,7 @@ static void cleanup(void)
 int main(int argc, char *argv[])
 {
     int opt;
-    while ((opt = getopt(argc, argv, "n:fxlcCw:a:h")) != -1) {
+    while ((opt = getopt(argc, argv, "n:fxlcCaAw:W:h")) != -1) {
         switch (opt) {
         case 'n':
             g_win_height = atoi(optarg);
@@ -220,10 +224,16 @@ int main(int argc, char *argv[])
         case 'C':
             g_color_mode = -1;
             break;
+        case 'a':
+            g_ansi_mode = 1;
+            break;
+        case 'A':
+            g_ansi_mode = -1;
+            break;
         case 'w':
             add_file(optarg, "w");
             break;
-        case 'a':
+        case 'W':
             add_file(optarg, "a");
             break;
         case 'h':
@@ -251,6 +261,13 @@ int main(int argc, char *argv[])
         const char *term = getenv("TERM");
         if (term && strcmp(term, "dumb") != 0)
             g_color = true;
+    }
+
+    /* detect ANSI passthrough */
+    if (g_ansi_mode == 1) {
+        g_ansi = true;
+    } else if (g_ansi_mode == -1) {
+        g_ansi = false;
     }
 
     /* set up input source — positional args are the command */
