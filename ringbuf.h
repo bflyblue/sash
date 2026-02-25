@@ -10,11 +10,11 @@
 #include <stddef.h>
 
 typedef struct {
-    char  **lines;
-    size_t *lengths;
-    size_t  capacity;
-    size_t  head;
-    size_t  count;
+  char **lines;
+  size_t *lengths;
+  size_t capacity;
+  size_t head;
+  size_t count;
 } RingBuf;
 
 void ringbuf_init(RingBuf *rb, size_t cap);
