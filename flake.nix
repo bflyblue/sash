@@ -31,7 +31,10 @@
         };
 
         devShells.default = pkgs.mkShell {
-          packages = [ pkgs.cmake pkgs.gcc ];
+          packages = [ pkgs.cmake pkgs.gcc pkgs.clang-tools ];
+          shellHook = ''
+            git config --local core.hooksPath .githooks
+          '';
         };
       });
 }

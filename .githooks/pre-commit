@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Format staged .c and .h files with clang-format before committing.
+
+if ! command -v clang-format &>/dev/null; then
+    echo "warning: clang-format not found, skipping format check" >&2
+    exit 0
+fi
+
+# Get staged .c and .h files (excluding deleted files)
+files=$(git diff --cached --name-only --diff-filter=d -- '*.c' '*.h')
+if [ -z "$files" ]; then
+    exit 0
+fi
+
+# Format and re-stage
+echo "$files" | xargs clang-format -i
+echo "$files" | xargs git add

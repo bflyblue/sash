@@ -24,40 +24,37 @@
 
 /* ── Draw buffer (internal) ──────────────────────────────────────── */
 
-static char  *g_draw_buf  = NULL;
-static size_t g_draw_cap  = 0;
-static size_t g_draw_len  = 0;
+static char *g_draw_buf = NULL;
+static size_t g_draw_cap = 0;
+static size_t g_draw_len = 0;
 
 static void dbuf_reset(void) { g_draw_len = 0; }
 
-static void dbuf_ensure(size_t need)
-{
-    if (g_draw_len + need > g_draw_cap) {
-        g_draw_cap = (g_draw_len + need) * 2;
-        g_draw_buf = realloc(g_draw_buf, g_draw_cap);
-        if (!g_draw_buf) {
-            perror("sash: realloc");
-            exit(1);
-        }
+static void dbuf_ensure(size_t need) {
+  if (g_draw_len + need > g_draw_cap) {
+    g_draw_cap = (g_draw_len + need) * 2;
+    g_draw_buf = realloc(g_draw_buf, g_draw_cap);
+    if (!g_draw_buf) {
+      perror("sash: realloc");
+      exit(1);
     }
+  }
 }
 
-static void dbuf_append(const char *s, size_t n)
-{
-    dbuf_ensure(n);
-    memcpy(g_draw_buf + g_draw_len, s, n);
-    g_draw_len += n;
+static void dbuf_append(const char *s, size_t n) {
+  dbuf_ensure(n);
+  memcpy(g_draw_buf + g_draw_len, s, n);
+  g_draw_len += n;
 }
 
-static void dbuf_printf(const char *fmt, ...)
-{
-    char tmp[256];
-    va_list ap;
-    va_start(ap, fmt);
-    int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
-    va_end(ap);
-    if (n > 0)
-        dbuf_append(tmp, n < (int)sizeof(tmp) ? (size_t)n : sizeof(tmp) - 1);
+static void dbuf_printf(const char *fmt, ...) {
+  char tmp[256];
+  va_list ap;
+  va_start(ap, fmt);
+  int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
+  va_end(ap);
+  if (n > 0)
+    dbuf_append(tmp, n < (int)sizeof(tmp) ? (size_t)n : sizeof(tmp) - 1);
 }
 
 /* ── TTY output ──────────────────────────────────────────────────── */
@@ -65,32 +62,28 @@ static void dbuf_printf(const char *fmt, ...)
 /* Single write() call — the kernel's tty atomic_write_lock ensures this
    won't interleave with other writers.  We intentionally don't retry short
    writes: a torn frame is better than two syscalls with a gap between them. */
-void tty_write(const char *buf, size_t len)
-{
-    if (g_tty_fd >= 0 && len > 0)
-        (void)!write(g_tty_fd, buf, len);
+void tty_write(const char *buf, size_t len) {
+  if (g_tty_fd >= 0 && len > 0)
+    (void)!write(g_tty_fd, buf, len);
 }
 
-static void dbuf_flush(void)
-{
-    tty_write(g_draw_buf, g_draw_len);
-}
+static void dbuf_flush(void) { tty_write(g_draw_buf, g_draw_len); }
 
-void display_free_drawbuf(void)
-{
-    free(g_draw_buf);
-    g_draw_buf = NULL;
+void display_free_drawbuf(void) {
+  free(g_draw_buf);
+  g_draw_buf = NULL;
 }
 
 /* ── Terminal size ───────────────────────────────────────────────── */
 
-void get_terminal_size(void)
-{
-    struct winsize ws;
-    if (g_tty_fd >= 0 && ioctl(g_tty_fd, TIOCGWINSZ, &ws) == 0) {
-        if (ws.ws_col > 0) g_term_cols = ws.ws_col;
-        if (ws.ws_row > 0) g_term_rows = ws.ws_row;
-    }
+void get_terminal_size(void) {
+  struct winsize ws;
+  if (g_tty_fd >= 0 && ioctl(g_tty_fd, TIOCGWINSZ, &ws) == 0) {
+    if (ws.ws_col > 0)
+      g_term_cols = ws.ws_col;
+    if (ws.ws_row > 0)
+      g_term_rows = ws.ws_row;
+  }
 }
 
 /* ── Rendering ───────────────────────────────────────────────────── */
@@ -109,63 +102,63 @@ void get_terminal_size(void)
  * and two-byte ESC sequences) without counting them as visible columns.
  * Appends a SGR reset (\033[0m) to prevent color bleed between rows.
  */
-static void sanitize_line(const char *src, size_t src_len, size_t max_cols)
-{
-    size_t col = 0;
-    for (size_t i = 0; i < src_len && col < max_cols; i++) {
-        unsigned char ch = (unsigned char)src[i];
+static void sanitize_line(const char *src, size_t src_len, size_t max_cols) {
+  size_t col = 0;
+  for (size_t i = 0; i < src_len && col < max_cols; i++) {
+    unsigned char ch = (unsigned char)src[i];
 
-        if (g_ansi && ch == '\033' && i + 1 < src_len) {
-            if (src[i + 1] == '[') {
-                /* CSI sequence: \033[ ... <final byte 0x40-0x7E> */
-                size_t start = i;
-                i += 2;  /* skip ESC [ */
-                while (i < src_len) {
-                    unsigned char c = (unsigned char)src[i];
-                    if (c >= 0x40 && c <= 0x7E) {
-                        i++;  /* include final byte */
-                        break;
-                    }
-                    i++;
-                }
-                dbuf_append(src + start, i - start);
-                i--;  /* compensate for loop increment */
-            } else {
-                /* Two-byte escape: ESC + next char */
-                dbuf_append(src + i, 2);
-                i++;  /* skip next char */
-            }
-            continue;
+    if (g_ansi && ch == '\033' && i + 1 < src_len) {
+      if (src[i + 1] == '[') {
+        /* CSI sequence: \033[ ... <final byte 0x40-0x7E> */
+        size_t start = i;
+        i += 2; /* skip ESC [ */
+        while (i < src_len) {
+          unsigned char c = (unsigned char)src[i];
+          if (c >= 0x40 && c <= 0x7E) {
+            i++; /* include final byte */
+            break;
+          }
+          i++;
         }
-
-        if (ch == '\n' || ch == '\r')
-            continue;
-
-        if (ch == '\t') {
-            size_t stop = ((col / 8) + 1) * 8;
-            if (stop > max_cols) stop = max_cols;
-            while (col < stop) {
-                dbuf_ensure(1);
-                g_draw_buf[g_draw_len++] = ' ';
-                col++;
-            }
-            continue;
-        }
-
-        if (ch < 0x20 || ch == 0x7f) {
-            dbuf_ensure(1);
-            g_draw_buf[g_draw_len++] = '.';
-            col++;
-            continue;
-        }
-
-        dbuf_ensure(1);
-        g_draw_buf[g_draw_len++] = (char)ch;
-        col++;
+        dbuf_append(src + start, i - start);
+        i--; /* compensate for loop increment */
+      } else {
+        /* Two-byte escape: ESC + next char */
+        dbuf_append(src + i, 2);
+        i++; /* skip next char */
+      }
+      continue;
     }
 
-    if (g_ansi)
-        dbuf_append("\033[0m", 4);
+    if (ch == '\n' || ch == '\r')
+      continue;
+
+    if (ch == '\t') {
+      size_t stop = ((col / 8) + 1) * 8;
+      if (stop > max_cols)
+        stop = max_cols;
+      while (col < stop) {
+        dbuf_ensure(1);
+        g_draw_buf[g_draw_len++] = ' ';
+        col++;
+      }
+      continue;
+    }
+
+    if (ch < 0x20 || ch == 0x7f) {
+      dbuf_ensure(1);
+      g_draw_buf[g_draw_len++] = '.';
+      col++;
+      continue;
+    }
+
+    dbuf_ensure(1);
+    g_draw_buf[g_draw_len++] = (char)ch;
+    col++;
+  }
+
+  if (g_ansi)
+    dbuf_append("\033[0m", 4);
 }
 
 /*
@@ -176,77 +169,82 @@ static void sanitize_line(const char *src, size_t src_len, size_t max_cols)
  * of the screen (below the scroll region).  The scroll region isolates
  * the window from scrolling caused by other processes writing to the TTY.
  */
-static void build_redraw(void)
-{
-    int height = g_win_height;
-    if (height > g_term_rows - 1)
-        height = g_term_rows - 1;
-    if (height < 1) height = 1;
+static void build_redraw(void) {
+  int height = g_win_height;
+  if (height > g_term_rows - 1)
+    height = g_term_rows - 1;
+  if (height < 1)
+    height = 1;
 
-    int win_top = g_win_top;
-    int margin = g_line_numbers ? 6 : 0;
-    int content_cols = g_term_cols - margin;
-    if (content_cols < 1) content_cols = 1;
+  int win_top = g_win_top;
+  int margin = g_line_numbers ? 6 : 0;
+  int content_cols = g_term_cols - margin;
+  if (content_cols < 1)
+    content_cols = 1;
 
-    /* move to the first row of the window */
-    dbuf_printf("\033[%d;1H", win_top);
+  /* move to the first row of the window */
+  dbuf_printf("\033[%d;1H", win_top);
 
-    /* compute base line number for visible rows */
-    size_t visible = g_ring.count < (size_t)height
-                   ? g_ring.count : (size_t)height;
-    size_t base = g_total_lines - visible + 1;
+  /* compute base line number for visible rows */
+  size_t visible =
+      g_ring.count < (size_t)height ? g_ring.count : (size_t)height;
+  size_t base = g_total_lines - visible + 1;
 
-    for (int row = 0; row < height; row++) {
-        /* carriage return + clear line */
-        dbuf_append("\r\033[2K", 5);
+  for (int row = 0; row < height; row++) {
+    /* carriage return + clear line */
+    dbuf_append("\r\033[2K", 5);
 
-        size_t len;
-        const char *line;
+    size_t len;
+    const char *line;
 
-        if ((size_t)row < g_ring.count) {
-            /* index from oldest visible to newest */
-            size_t idx;
-            if (g_ring.count <= (size_t)height)
-                idx = (size_t)row;
-            else
-                idx = g_ring.count - (size_t)height + (size_t)row;
-            line = ringbuf_get(&g_ring, idx, &len);
+    if ((size_t)row < g_ring.count) {
+      /* index from oldest visible to newest */
+      size_t idx;
+      if (g_ring.count <= (size_t)height)
+        idx = (size_t)row;
+      else
+        idx = g_ring.count - (size_t)height + (size_t)row;
+      line = ringbuf_get(&g_ring, idx, &len);
 
-            if (g_line_numbers) {
-                if (g_color) dbuf_append("\033[90m", 5);
-                dbuf_printf("%5zu\xe2\x94\x82", base + (size_t)row);
-                if (g_color) dbuf_append("\033[0m", 4);
-            }
-        } else {
-            line = "";
-            len  = 0;
+      if (g_line_numbers) {
+        if (g_color)
+          dbuf_append("\033[90m", 5);
+        dbuf_printf("%5zu\xe2\x94\x82", base + (size_t)row);
+        if (g_color)
+          dbuf_append("\033[0m", 4);
+      }
+    } else {
+      line = "";
+      len = 0;
 
-            if (g_line_numbers) {
-                if (g_color) dbuf_append("\033[90m", 5);
-                dbuf_append("     \xe2\x94\x82", 8);
-                if (g_color) dbuf_append("\033[0m", 4);
-            }
-        }
-
-        sanitize_line(line, len, (size_t)content_cols);
-
-        /* move down (except on last row) */
-        if (row < height - 1)
-            dbuf_append("\n", 1);
+      if (g_line_numbers) {
+        if (g_color)
+          dbuf_append("\033[90m", 5);
+        dbuf_append("     \xe2\x94\x82", 8);
+        if (g_color)
+          dbuf_append("\033[0m", 4);
+      }
     }
 
-    /* park cursor at the bottom of the scroll region so any concurrent
-       output (e.g. stderr from the piped command) appears above the window */
-    if (g_scroll_bottom > 0)
-        dbuf_printf("\033[%d;1H", g_scroll_bottom);
+    sanitize_line(line, len, (size_t)content_cols);
+
+    /* move down (except on last row) */
+    if (row < height - 1)
+      dbuf_append("\n", 1);
+  }
+
+  /* park cursor at the bottom of the scroll region so any concurrent
+     output (e.g. stderr from the piped command) appears above the window */
+  if (g_scroll_bottom > 0)
+    dbuf_printf("\033[%d;1H", g_scroll_bottom);
 }
 
-void redraw_window(void)
-{
-    if (!g_is_tty) return;
-    dbuf_reset();
-    build_redraw();
-    dbuf_flush();
+void redraw_window(void) {
+  if (!g_is_tty)
+    return;
+  dbuf_reset();
+  build_redraw();
+  dbuf_flush();
 }
 
 /* ── Cursor & window setup ───────────────────────────────────────── */
@@ -255,116 +253,123 @@ void redraw_window(void)
  * Query the cursor's current row via DSR (Device Status Report).
  * Returns the 1-based row number, or 0 on failure.
  */
-static int get_cursor_row(void)
-{
-    if (g_tty_fd < 0) return 0;
+static int get_cursor_row(void) {
+  if (g_tty_fd < 0)
+    return 0;
 
-    struct termios orig, raw;
-    if (tcgetattr(g_tty_fd, &orig) == -1) return 0;
+  struct termios orig, raw;
+  if (tcgetattr(g_tty_fd, &orig) == -1)
+    return 0;
 
-    raw = orig;
-    raw.c_lflag &= (tcflag_t)~(ICANON | ECHO);
-    raw.c_cc[VMIN]  = 0;
-    raw.c_cc[VTIME] = 1;  /* 100 ms timeout */
-    if (tcsetattr(g_tty_fd, TCSANOW, &raw) == -1) return 0;
+  raw = orig;
+  raw.c_lflag &= (tcflag_t) ~(ICANON | ECHO);
+  raw.c_cc[VMIN] = 0;
+  raw.c_cc[VTIME] = 1; /* 100 ms timeout */
+  if (tcsetattr(g_tty_fd, TCSANOW, &raw) == -1)
+    return 0;
 
-    /* send DSR */
-    (void)!write(g_tty_fd, "\033[6n", 4);
+  /* send DSR */
+  (void)!write(g_tty_fd, "\033[6n", 4);
 
-    /* read response: \033[row;colR */
-    char resp[32];
-    size_t pos = 0;
-    while (pos < sizeof(resp) - 1) {
-        ssize_t n = read(g_tty_fd, &resp[pos], 1);
-        if (n <= 0) break;
-        if (resp[pos] == 'R') { pos++; break; }
-        pos++;
+  /* read response: \033[row;colR */
+  char resp[32];
+  size_t pos = 0;
+  while (pos < sizeof(resp) - 1) {
+    ssize_t n = read(g_tty_fd, &resp[pos], 1);
+    if (n <= 0)
+      break;
+    if (resp[pos] == 'R') {
+      pos++;
+      break;
     }
-    resp[pos] = '\0';
+    pos++;
+  }
+  resp[pos] = '\0';
 
-    tcsetattr(g_tty_fd, TCSANOW, &orig);
+  tcsetattr(g_tty_fd, TCSANOW, &orig);
 
-    /* parse \033[row;colR */
-    int row = 0;
-    char *p = strchr(resp, '[');
-    if (p) {
-        row = atoi(p + 1);
-    }
-    return row;
+  /* parse \033[row;colR */
+  int row = 0;
+  char *p = strchr(resp, '[');
+  if (p) {
+    row = atoi(p + 1);
+  }
+  return row;
 }
 
-void setup_window(void)
-{
-    if (!g_is_tty) return;
+void setup_window(void) {
+  if (!g_is_tty)
+    return;
 
-    get_terminal_size();
+  get_terminal_size();
 
-    int height = g_win_height;
-    if (height > g_term_rows - 1)
-        height = g_term_rows - 1;
-    if (height < 1) height = 1;
+  int height = g_win_height;
+  if (height > g_term_rows - 1)
+    height = g_term_rows - 1;
+  if (height < 1)
+    height = 1;
 
-    /* Decide where to place the window: just below the cursor if it fits,
-       otherwise scroll to make room at the bottom. */
-    int newlines;
-    int cursor_row = get_cursor_row();
-    if (cursor_row > 0 && cursor_row + height - 1 <= g_term_rows) {
-        g_win_top = cursor_row;
-        newlines = 0;
-    } else {
-        g_win_top = g_term_rows - height + 1;
-        newlines = height - 1;
-    }
-    g_scroll_bottom = g_win_top - 1;
+  /* Decide where to place the window: just below the cursor if it fits,
+     otherwise scroll to make room at the bottom. */
+  int newlines;
+  int cursor_row = get_cursor_row();
+  if (cursor_row > 0 && cursor_row + height - 1 <= g_term_rows) {
+    g_win_top = cursor_row;
+    newlines = 0;
+  } else {
+    g_win_top = g_term_rows - height + 1;
+    newlines = height - 1;
+  }
+  g_scroll_bottom = g_win_top - 1;
 
-    /* Everything below is assembled into one buffer and emitted as a single
-       atomic write() to avoid other TTY writers slipping in between. */
-    dbuf_reset();
+  /* Everything below is assembled into one buffer and emitted as a single
+     atomic write() to avoid other TTY writers slipping in between. */
+  dbuf_reset();
 
-    /* Reserve space: push existing content (prompt, etc.) above the window. */
-    for (int i = 0; i < newlines; i++)
-        dbuf_append("\n", 1);
+  /* Reserve space: push existing content (prompt, etc.) above the window. */
+  for (int i = 0; i < newlines; i++)
+    dbuf_append("\n", 1);
 
-    /* Hide cursor — stays hidden for the lifetime of the tool */
-    dbuf_append("\033[?25l", 6);
+  /* Hide cursor — stays hidden for the lifetime of the tool */
+  dbuf_append("\033[?25l", 6);
 
-    /* Set scroll region to the rows above the window.  Anything writing to
-       the TTY while the cursor is in this region (e.g. stderr from a piped
-       command) will scroll within it, leaving the window untouched.
-       DECSTBM requires top < bottom, so we need at least 2 rows. */
-    if (g_scroll_bottom >= 2)
-        dbuf_printf("\033[1;%dr", g_scroll_bottom);
+  /* Set scroll region to the rows above the window.  Anything writing to
+     the TTY while the cursor is in this region (e.g. stderr from a piped
+     command) will scroll within it, leaving the window untouched.
+     DECSTBM requires top < bottom, so we need at least 2 rows. */
+  if (g_scroll_bottom >= 2)
+    dbuf_printf("\033[1;%dr", g_scroll_bottom);
 
-    /* Draw the initial (empty) window and park cursor in the scroll region */
-    build_redraw();
+  /* Draw the initial (empty) window and park cursor in the scroll region */
+  build_redraw();
 
-    dbuf_flush();
-    g_started = true;
+  dbuf_flush();
+  g_started = true;
 }
 
 /* ── Resize handling ─────────────────────────────────────────────── */
 
-void handle_resize(void)
-{
-    g_resize = 0;
-    get_terminal_size();
+void handle_resize(void) {
+  g_resize = 0;
+  get_terminal_size();
 
-    int height = g_win_height;
-    if (height > g_term_rows - 1)
-        height = g_term_rows - 1;
-    if (height < 1) height = 1;
+  int height = g_win_height;
+  if (height > g_term_rows - 1)
+    height = g_term_rows - 1;
+  if (height < 1)
+    height = 1;
 
-    g_win_top = g_term_rows - height + 1;
-    g_scroll_bottom = g_win_top - 1;
+  g_win_top = g_term_rows - height + 1;
+  g_scroll_bottom = g_win_top - 1;
 
-    if (g_started) {
-        dbuf_reset();
-        /* update scroll region for new terminal size */
-        if (g_scroll_bottom >= 2)
-            dbuf_printf("\033[1;%dr", g_scroll_bottom);
-        else
-            dbuf_append("\033[r", 3);  /* reset to full screen */
-        build_redraw();
-        dbuf_flush();
-    }
+  if (g_started) {
+    dbuf_reset();
+    /* update scroll region for new terminal size */
+    if (g_scroll_bottom >= 2)
+      dbuf_printf("\033[1;%dr", g_scroll_bottom);
+    else
+      dbuf_append("\033[r", 3); /* reset to full screen */
+    build_redraw();
+    dbuf_flush();
+  }
 }
