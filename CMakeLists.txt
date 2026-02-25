@@ -27,7 +27,7 @@ if(NOT HAVE_TIOCGWINSZ)
 endif()
 
 # Build
-add_executable(sash sash.c)
+add_executable(sash sash.c ringbuf.c display.c process.c)
 
 # Install
 install(TARGETS sash DESTINATION bin)
