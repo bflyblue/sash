@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: BSD-2-Clause
 cmake_minimum_required(VERSION 3.10)
-project(sash VERSION 0.1.0 LANGUAGES C)
+
+file(READ "${CMAKE_SOURCE_DIR}/VERSION" SASH_BASE_VERSION)
+string(STRIP "${SASH_BASE_VERSION}" SASH_BASE_VERSION)
+
+project(sash VERSION ${SASH_BASE_VERSION} LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -25,6 +29,38 @@ endif()
 if(NOT HAVE_TIOCGWINSZ)
     message(WARNING "TIOCGWINSZ not found - terminal size detection may not work")
 endif()
+
+# Version: base from VERSION file, with git suffix for dev builds.
+set(SASH_VERSION "${PROJECT_VERSION}")
+execute_process(
+    COMMAND git describe --tags --exact-match
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_QUIET ERROR_QUIET
+    RESULT_VARIABLE GIT_TAG_RESULT
+)
+if(NOT GIT_TAG_RESULT EQUAL 0)
+    # Not on an exact tag — append git info
+    execute_process(
+        COMMAND git rev-parse --short HEAD
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE GIT_SHORT_REV
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+        ERROR_QUIET
+        RESULT_VARIABLE GIT_REV_RESULT
+    )
+    if(GIT_REV_RESULT EQUAL 0)
+        set(SASH_VERSION "${SASH_VERSION}-${GIT_SHORT_REV}")
+        execute_process(
+            COMMAND git diff --quiet HEAD
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            RESULT_VARIABLE GIT_DIRTY_RESULT
+        )
+        if(NOT GIT_DIRTY_RESULT EQUAL 0)
+            set(SASH_VERSION "${SASH_VERSION}-dirty")
+        endif()
+    endif()
+endif()
+add_compile_definitions(SASH_VERSION="${SASH_VERSION}")
 
 # Build
 add_executable(sash sash.c ringbuf.c display.c process.c)

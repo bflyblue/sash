@@ -89,6 +89,7 @@ static void usage(void) {
                   "  -A      Force ANSI escape sequences off\n"
                   "  -w FILE Write output to FILE (truncate)\n"
                   "  -W FILE Append output to FILE\n"
+                  "  -V      Show version\n"
                   "  -h      Show this help\n"
                   "\n"
                   "Pipe mode:    command | sash [-w file ...]\n"
@@ -201,8 +202,11 @@ static void cleanup(void) {
 
 int main(int argc, char *argv[]) {
   int opt;
-  while ((opt = getopt(argc, argv, "n:fxlcCaAw:W:h")) != -1) {
+  while ((opt = getopt(argc, argv, "Vn:fxlcCaAw:W:h")) != -1) {
     switch (opt) {
+    case 'V':
+      printf("sash %s\n", SASH_VERSION);
+      return 0;
     case 'n': {
       char *endptr;
       errno = 0;

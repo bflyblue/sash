@@ -11,9 +11,12 @@
       let
         pkgs = nixpkgs.legacyPackages.${system};
       in {
-        packages.default = pkgs.stdenv.mkDerivation {
+        packages.default = let
+          version = builtins.replaceStrings ["\n"] [""]
+            (builtins.readFile ./VERSION);
+        in pkgs.stdenv.mkDerivation {
           pname = "sash";
-          version = "0.1.0";
+          inherit version;
           src = pkgs.lib.cleanSourceWith {
             src = ./.;
             filter = path: type:
