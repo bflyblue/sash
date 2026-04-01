@@ -22,6 +22,8 @@ static char *join_args(char **argv) {
   size_t len = 0;
   for (int i = 0; argv[i]; i++)
     len += strlen(argv[i]) + 1;
+  if (len == 0)
+    len = 1; /* room for '\0' when argv is empty */
   char *buf = malloc(len);
   if (!buf) {
     perror("sash: malloc");
@@ -63,7 +65,8 @@ pid_t spawn_command(char **cmd_argv, bool use_exec, int *read_fd) {
     } else {
       char *cmd = join_args(cmd_argv);
       execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
-      free(cmd);
+      /* free(cmd) intentionally omitted: unreachable after successful exec,
+         and _exit() below makes it moot on failure */
     }
     perror("sash: exec");
     _exit(127);
