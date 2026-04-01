@@ -65,7 +65,10 @@ pid_t spawn_command(char **cmd_argv, bool use_exec, int *read_fd) {
       execvp(cmd_argv[0], cmd_argv);
     } else {
       char *cmd = join_args(cmd_argv);
-      execl("/bin/sh", "sh", "-c", cmd, (char *)NULL);
+      const char *shell = getenv("SHELL");
+      if (!shell)
+        shell = "/bin/sh";
+      execl(shell, shell, "-c", cmd, (char *)NULL);
       /* free(cmd) intentionally omitted: unreachable after successful exec,
          and _exit() below makes it moot on failure */
     }

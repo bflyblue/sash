@@ -46,6 +46,7 @@ int g_tty_fd = -1;
 bool g_is_tty = false;
 static bool g_flush = false;
 static bool g_exec = false;
+static bool g_file_input = false;
 bool g_line_numbers = false;
 bool g_color = false;
 static int g_color_mode = 0; /* 0=auto, 1=force on, -1=force off */
@@ -76,11 +77,12 @@ static void add_file(const char *path, const char *mode) {
 }
 
 static void usage(void) {
-  fprintf(stderr, "Usage: sash [-n lines] [-f] [-x] [-l] [-c|-C] [-a|-A] [-w "
-                  "file] [-W file] [-h] [command [args...]]\n"
+  fprintf(stderr, "Usage: sash [-n lines] [-f] [-r] [-x] [-l] [-c|-C] [-a|-A] "
+                  "[-w file] [-W file] [-h] [command [args...]]\n"
                   "\n"
                   "  -n N    Window height (default: 10)\n"
                   "  -f      Flush output files after each line\n"
+                  "  -r      Read from files instead of running a command\n"
                   "  -x      Use exec instead of shell (no pipes, &&, etc.)\n"
                   "  -l      Show line numbers\n"
                   "  -c      Force color on\n"
@@ -202,7 +204,7 @@ static void cleanup(void) {
 
 int main(int argc, char *argv[]) {
   int opt;
-  while ((opt = getopt(argc, argv, "Vn:fxlcCaAw:W:h")) != -1) {
+  while ((opt = getopt(argc, argv, "Vn:frxlcCaAw:W:h")) != -1) {
     switch (opt) {
     case 'V':
       printf("sash %s\n", SASH_VERSION);
@@ -220,6 +222,9 @@ int main(int argc, char *argv[]) {
     } break;
     case 'f':
       g_flush = true;
+      break;
+    case 'r':
+      g_file_input = true;
       break;
     case 'x':
       g_exec = true;
@@ -279,10 +284,14 @@ int main(int argc, char *argv[]) {
     g_ansi = false;
   }
 
-  /* set up input source — positional args are the command */
+  /* set up input source */
   FILE *input = stdin;
+  int exit_code = 0;
 
-  if (optind < argc) {
+  if (g_file_input && optind < argc) {
+    /* -r: treat positional args as input files */
+  } else if (optind < argc) {
+    /* command mode: positional args are the command */
     int pipe_fd;
     g_child_pid = spawn_command(&argv[optind], g_exec, &pipe_fd);
     input = fdopen(pipe_fd, "r");
@@ -307,29 +316,45 @@ int main(int argc, char *argv[]) {
   if (g_is_tty)
     setup_window();
 
-  /* main loop */
+  /* main loop — process lines from one or more inputs */
   char *line = NULL;
   size_t line_cap = 0;
   ssize_t nread;
-  int exit_code = 0;
 
-  while ((nread = getline(&line, &line_cap, input)) > 0) {
-    /* check for resize before processing */
-    if (g_resize)
-      handle_resize();
-
-    g_total_lines++;
-
-    /* write raw line to output files */
-    write_to_files(line, (size_t)nread);
-
-    if (g_is_tty) {
-      /* push to ring buffer and redraw */
-      ringbuf_push(&g_ring, line, (size_t)nread);
-      redraw_window();
-    } else {
-      /* passthrough mode: write to stdout */
-      fwrite(line, 1, (size_t)nread, stdout);
+  if (g_file_input && optind < argc) {
+    for (int i = optind; i < argc; i++) {
+      FILE *f = fopen(argv[i], "r");
+      if (!f) {
+        fprintf(stderr, "sash: %s: %s\n", argv[i], strerror(errno));
+        exit_code = 1;
+        continue;
+      }
+      while ((nread = getline(&line, &line_cap, f)) > 0) {
+        if (g_resize)
+          handle_resize();
+        g_total_lines++;
+        write_to_files(line, (size_t)nread);
+        if (g_is_tty) {
+          ringbuf_push(&g_ring, line, (size_t)nread);
+          redraw_window();
+        } else {
+          fwrite(line, 1, (size_t)nread, stdout);
+        }
+      }
+      fclose(f);
+    }
+  } else {
+    while ((nread = getline(&line, &line_cap, input)) > 0) {
+      if (g_resize)
+        handle_resize();
+      g_total_lines++;
+      write_to_files(line, (size_t)nread);
+      if (g_is_tty) {
+        ringbuf_push(&g_ring, line, (size_t)nread);
+        redraw_window();
+      } else {
+        fwrite(line, 1, (size_t)nread, stdout);
+      }
     }
   }
 
