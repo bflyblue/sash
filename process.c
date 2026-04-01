@@ -10,6 +10,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -74,6 +75,8 @@ pid_t spawn_command(char **cmd_argv, bool use_exec, int *read_fd) {
 
   /* parent */
   close(pipefd[1]);
+  /* Set close-on-exec so the read fd doesn't leak into grandchildren */
+  fcntl(pipefd[0], F_SETFD, FD_CLOEXEC);
   *read_fd = pipefd[0];
   return pid;
 }
