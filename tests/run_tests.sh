@@ -5,8 +5,8 @@
 set -euo pipefail
 
 SASH="${SASH_BIN:-$(dirname "$0")/../build/sash}"
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+TEST_TMPDIR="$(mktemp -d)"
+trap 'rm -rf "$TEST_TMPDIR"' EXIT
 
 PASS=0
 FAIL=0
@@ -105,43 +105,43 @@ expected="$(printf 'a\nb\nc\nd\ne')"
 assert_eq "-n does not affect passthrough" "$expected" "$out"
 
 # 12. -w creates file with correct content
-f="$TMPDIR/w1.txt"
+f="$TEST_TMPDIR/w1.txt"
 printf 'hello\nworld\n' | "$SASH" -w "$f" >/dev/null
 assert_file_content "-w creates file" "$f" "$(printf 'hello\nworld')"
 
 # 13. -w truncates existing file
-f="$TMPDIR/w2.txt"
+f="$TEST_TMPDIR/w2.txt"
 echo "old content" > "$f"
 printf 'new\n' | "$SASH" -w "$f" >/dev/null
 assert_file_content "-w truncates existing file" "$f" "new"
 
 # 14. -W appends
-f="$TMPDIR/a1.txt"
+f="$TEST_TMPDIR/a1.txt"
 printf 'first\n' | "$SASH" -w "$f" >/dev/null
 printf 'second\n' | "$SASH" -W "$f" >/dev/null
 assert_file_content "-W appends" "$f" "$(printf 'first\nsecond')"
 
 # 15. Multiple output files (-w + -w)
-f1="$TMPDIR/m1.txt"
-f2="$TMPDIR/m2.txt"
+f1="$TEST_TMPDIR/m1.txt"
+f2="$TEST_TMPDIR/m2.txt"
 printf 'data\n' | "$SASH" -w "$f1" -w "$f2" >/dev/null
 assert_file_content "multiple -w: file 1" "$f1" "data"
 assert_file_content "multiple -w: file 2" "$f2" "data"
 
 # 16. Mixed -w and -W
-f="$TMPDIR/mix.txt"
+f="$TEST_TMPDIR/mix.txt"
 printf 'base\n' | "$SASH" -w "$f" >/dev/null
 printf 'added\n' | "$SASH" -W "$f" >/dev/null
 assert_file_content "mixed -w and -W" "$f" "$(printf 'base\nadded')"
 
 # 17. stdout AND file simultaneously
-f="$TMPDIR/sim.txt"
+f="$TEST_TMPDIR/sim.txt"
 out="$(printf 'both\n' | "$SASH" -w "$f")"
 assert_eq "stdout and file: stdout" "both" "$out"
 assert_file_content "stdout and file: file" "$f" "both"
 
 # 18. -f doesn't break output
-f="$TMPDIR/flush.txt"
+f="$TEST_TMPDIR/flush.txt"
 printf 'flushed\n' | "$SASH" -f -w "$f" >/dev/null
 assert_file_content "-f does not break output" "$f" "flushed"
 
@@ -150,7 +150,7 @@ out="$("$SASH" echo hello)"
 assert_eq "command mode basic" "hello" "$out"
 
 # 20. Command mode with -w
-f="$TMPDIR/cmd.txt"
+f="$TEST_TMPDIR/cmd.txt"
 "$SASH" -w "$f" echo hello >/dev/null
 assert_file_content "command mode with -w" "$f" "hello"
 
