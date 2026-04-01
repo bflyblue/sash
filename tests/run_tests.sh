@@ -78,6 +78,12 @@ assert_exit "invalid flag exits non-zero" 1 "$SASH" -Z
 # 5. -n 0 rejected
 assert_exit "-n 0 rejected" 1 "$SASH" -n 0
 
+# 5b. -n with non-numeric argument rejected
+assert_exit "-n abc rejected" 1 "$SASH" -n abc
+
+# 5c. -n with trailing garbage rejected
+assert_exit "-n 10abc rejected" 1 "$SASH" -n 10abc
+
 # 6. Passthrough: single line
 out="$(echo hello | "$SASH")"
 assert_eq "passthrough: single line" "hello" "$out"

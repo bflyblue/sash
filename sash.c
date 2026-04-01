@@ -16,6 +16,7 @@
 
 #include <errno.h>
 #include <getopt.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -202,13 +203,17 @@ int main(int argc, char *argv[]) {
   int opt;
   while ((opt = getopt(argc, argv, "n:fxlcCaAw:W:h")) != -1) {
     switch (opt) {
-    case 'n':
-      g_win_height = atoi(optarg);
-      if (g_win_height < 1) {
-        fprintf(stderr, "sash: window height must be >= 1\n");
+    case 'n': {
+      char *endptr;
+      errno = 0;
+      long val = strtol(optarg, &endptr, 10);
+      if (errno != 0 || *endptr != '\0' || endptr == optarg || val < 1 ||
+          val > INT_MAX) {
+        fprintf(stderr, "sash: invalid window height: '%s'\n", optarg);
         return 1;
       }
-      break;
+      g_win_height = (int)val;
+    } break;
     case 'f':
       g_flush = true;
       break;
