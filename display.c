@@ -48,13 +48,31 @@ static void dbuf_append(const char *s, size_t n) {
 }
 
 static void dbuf_printf(const char *fmt, ...) {
-  char tmp[256];
   va_list ap;
+
+  /* Try a small stack buffer first (covers all current callers). */
+  char tmp[256];
   va_start(ap, fmt);
   int n = vsnprintf(tmp, sizeof(tmp), fmt, ap);
   va_end(ap);
-  if (n > 0)
-    dbuf_append(tmp, n < (int)sizeof(tmp) ? (size_t)n : sizeof(tmp) - 1);
+
+  if (n < 0)
+    return;
+
+  if ((size_t)n < sizeof(tmp)) {
+    dbuf_append(tmp, (size_t)n);
+    return;
+  }
+
+  /* Output was truncated — allocate the exact size needed. */
+  char *big = malloc((size_t)n + 1);
+  if (!big)
+    return; /* best-effort: skip this fragment on OOM */
+  va_start(ap, fmt);
+  vsnprintf(big, (size_t)n + 1, fmt, ap);
+  va_end(ap);
+  dbuf_append(big, (size_t)n);
+  free(big);
 }
 
 /* ── TTY output ──────────────────────────────────────────────────── */
