@@ -19,13 +19,13 @@
 void ringbuf_init(RingBuf *rb, size_t cap) {
   rb->lines = calloc(cap, sizeof(char *));
   rb->lengths = calloc(cap, sizeof(size_t));
-  rb->capacity = cap;
-  rb->head = 0;
-  rb->count = 0;
   if (!rb->lines || !rb->lengths) {
     perror("sash: calloc");
     exit(1);
   }
+  rb->capacity = cap;
+  rb->head = 0;
+  rb->count = 0;
 }
 
 void ringbuf_push(RingBuf *rb, const char *line, size_t len) {
